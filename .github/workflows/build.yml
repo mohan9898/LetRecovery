@@ -1,5 +1,5 @@
 name: LetRecovery Auto Build
-于:
+on:
   push:
     branches: [ main ]
   pull_request:

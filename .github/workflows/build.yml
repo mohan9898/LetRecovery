@@ -1,0 +1,72 @@
+name: LetRecovery 自动编译
+
+# 触发条件：push 到 main 分支、手动触发、PR 到 main 分支
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # 手动触发
+
+jobs:
+  build-windows:
+    name: Windows 编译
+    runs-on: windows-latest # 使用 GitHub 托管的 Windows 最新版虚拟机
+
+    steps:
+      # 1. 检出仓库代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 安装 Rust 环境（指定 1.75 及以上版本）
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.75 # 匹配项目要求的最低 Rust 版本
+          override: true
+
+      # 3. 配置 Rust 镜像（加速依赖下载，可选但推荐）
+      - name: 配置 Rust 镜像源
+        run: |
+          New-Item -Path $env:USERPROFILE\.cargo -Name config -ItemType File -Force
+          Add-Content -Path $env:USERPROFILE\.cargo\config -Value @"
+          [source.crates-io]
+          replace-with = 'tuna'
+          [source.tuna]
+          registry = 'https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git'
+          "@
+
+      # 4. 安装 Visual Studio Build Tools（Windows 编译依赖）
+      - name: 安装 MSVC 构建工具
+        uses: ilammy/msvc-dev-cmd@v1 # 自动配置 MSVC 环境变量
+
+      # 5. 编译「正常系统端」
+      - name: 编译正常系统端
+        run: |
+          cd 正常系统端
+          cargo build --release --verbose
+
+      # 6. 编译「PE 端」
+      - name: 编译 PE 端
+        run: |
+          cd ../PE端
+          cargo build --release --verbose
+        working-directory: 正常系统端 # 从「正常系统端」目录返回上级再进入 PE 端
+
+      # 7. 打包编译产物（方便下载）
+      - name: 打包产物
+        run: |
+          # 创建产物目录
+          New-Item -Path ./release -ItemType Directory -Force
+          # 复制正常系统端产物
+          Copy-Item -Path ./正常系统端/target/release/* -Destination ./release/正常系统端/ -Recurse -Force
+          # 复制 PE 端产物
+          Copy-Item -Path ./PE端/target/release/* -Destination ./release/PE端/ -Recurse -Force
+
+      # 8. 上传产物为 GitHub Artifact（可在 Actions 页面下载）
+      - name: 上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LetRecovery-Windows-Release
+          path: ./release/ # 上传打包后的所有产物
+          retention-days: 30 # 产物保留 30 天

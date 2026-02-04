@@ -1,4 +1,4 @@
-name: LetRecovery 自动编译
+name: LetRecovery Auto Build
 于:
   push:
     branches: [ main ]
@@ -8,29 +8,26 @@ name: LetRecovery 自动编译
 
 jobs:
   build-windows:
-    name: Windows 编译
+    name: Windows Build
     runs-on: windows-latest
     steps:
-      - name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 修复1：升级Rust工具链（指定完整版本+强制覆盖+最小化安装）
-      - name: 安装 Rust 1.75+（含高版本Cargo）
+      - name: Install Rust 1.75.0
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.75.0  # 改为完整版本号，避免版本模糊匹配
-          override: true     # 强制覆盖系统原有旧版Rust/Cargo
-          profile: minimal   # 仅安装核心工具，加快速度
+          toolchain: 1.75.0
+          override: true
+          profile: minimal
 
-      # 修复2：构建前删除旧Cargo.lock，让Cargo重新生成适配版本
-      - name: 删除旧锁文件（解决v4版本不兼容）
+      - name: Delete old Cargo.lock files
         run: |
-          # 分别删除两个子项目的旧Cargo.lock
           if (Test-Path ./正常系统端/Cargo.lock) { Remove-Item ./正常系统端/Cargo.lock -Force }
           if (Test-Path ./PE端/Cargo.lock) { Remove-Item ./PE端/Cargo.lock -Force }
         shell: pwsh
 
-      - name: 配置 Rust 镜像源
+      - name: Configure Rust mirror
         run: |
           New-Item -Path $env:USERPROFILE\.cargo -Name config -ItemType File -Force
           Add-Content -Path $env:USERPROFILE\.cargo\config -Value @"
@@ -40,29 +37,26 @@ jobs:
           registry = 'https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git'
           "@
 
-      - name: 安装 MSVC 构建工具
+      - name: Setup MSVC build tools
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 新增：验证Cargo版本（可选，用于调试确认）
-      - name: 检查 Cargo/Rust 版本
+      - name: Check Rust/Cargo version
         run: |
           rustc --version
-          cargo --version  # 确认输出≥1.75.0
+          cargo --version
 
-      # 修复3：编译时禁用--locked，允许Cargo重建锁文件
-      - name: 编译正常系统端
+      - name: Build Normal System Version
         run: |
           cd 正常系统端
-          cargo build --release --verbose  # 移除--locked，避免强制使用旧锁文件
+          cargo build --release --verbose
 
-      - name: 编译 PE 端
+      - name: Build PE Version
         run: |
           cd PE端
           cargo build --release --verbose
-        working-directory: .  # 简化工作目录，避免路径嵌套问题
+        working-directory: .
 
-      # 修复4：优化缓存配置（可选，避免缓存旧锁文件）
-      - name: 配置 Cargo 缓存
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -74,13 +68,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: 打包产物
+      - name: Package build artifacts
         run: |
           New-Item -Path ./release -ItemType Directory -Force
-          Copy-Item -Path ./正常系统端/target/release/* -Destination ./release/正常系统端/ -Recurse -Force
-          Copy-Item -Path ./PE端/target/release/* -Destination ./release/PE端/ -Recurse -Force
+          Copy-Item -Path ./正常系统端/target/release/* -Destination ./release/NormalSystem/ -Recurse -Force
+          Copy-Item -Path ./PE端/target/release/* -Destination ./release/PE/ -Recurse -Force
+        shell: pwsh
 
-      - name: 上传编译产物
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LetRecovery-Windows-Release

@@ -4,64 +4,62 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # 支持手动触发
+  workflow_dispatch:
 
 jobs:
   build-windows:
-    name: Windows Build
+    name: Windows Build (Nightly)
     runs-on: windows-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 核心终极修改：安装Rust 1.80.0（edition2024正式稳定版）
-      - name: Install Rust 1.80.0 (official stable edition2024)
-        uses: dtolnay/rust-toolchain@stable
+      # 核心修改：安装Rust Nightly版（支持完整edition2024特性）
+      - name: Install Rust Nightly (full edition2024 support)
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: 1.80.0  # 唯一能原生支持edition2024的最低稳定版
-          override: true     # 强制覆盖系统所有旧版本
-          profile: minimal   # 仅装核心工具，提升构建速度
+          toolchain: nightly
+          override: true
+          profile: minimal
 
-      # 极致清理：删除所有旧文件+缓存，杜绝任何解析残留
+      # 极致清理：删除所有旧文件+全局缓存，杜绝解析残留
       - name: Clean all old files and cargo cache (force)
         shell: pwsh
         run: |
-          # 定义两个子项目路径
           $projPaths = @("./正常系统端", "./PE端")
-          # 遍历删除子项目的Cargo.lock和target目录
           foreach ($path in $projPaths) {
             if (Test-Path "$path/Cargo.lock") { Remove-Item "$path/Cargo.lock" -Force -ErrorAction SilentlyContinue }
             if (Test-Path "$path/target") { Remove-Item "$path/target" -Recurse -Force -ErrorAction SilentlyContinue }
           }
-          # 强制删除Cargo全局注册表（镜像源缓存的旧依赖清单，关键）
           if (Test-Path "$env:USERPROFILE\.cargo\registry") { Remove-Item "$env:USERPROFILE\.cargo\registry" -Recurse -Force -ErrorAction SilentlyContinue }
-          # 强制删除Cargo git缓存
           if (Test-Path "$env:USERPROFILE\.cargo\git") { Remove-Item "$env:USERPROFILE\.cargo\git" -Recurse -Force -ErrorAction SilentlyContinue }
 
-      # 保留清华镜像源，加速依赖下载（无需更换）
-      - name: Configure Rust Tuna Mirror
+      # 关键新增：启用Cargo所有不稳定特性（Nightly版必需，支持edition2024完整特性）
+      - name: Enable all unstable Cargo features (Nightly required)
         shell: pwsh
         run: |
           New-Item -Path $env:USERPROFILE\.cargo -Name config -ItemType File -Force -ErrorAction SilentlyContinue
-          # 覆盖写入配置，避免旧配置残留
           Set-Content -Path $env:USERPROFILE\.cargo\config -Value @"
           [source.crates-io]
           replace-with = 'tuna'
           [source.tuna]
           registry = 'https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git'
+          # 启用unstable特性，支持完整edition2024
+          [unstable]
+          edition2024 = true
+          cargo-features = ["edition2024"]
           "@
 
-      # 配置MSVC构建工具，解决link.exe缺失
       - name: Setup MSVC Build Tools
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 验证版本（必须输出1.80.0，否则编译必错）
-      - name: Verify Rust/Cargo Version (MUST 1.80.0)
+      # 验证Nightly版本
+      - name: Verify Rust/Cargo Nightly Version
         run: |
-          rustc --version # 预期输出：rustc 1.80.0 (xxx 2024-07-25)
-          cargo --version # 预期输出：cargo 1.80.0 (xxx 2024-07-18)
+          rustc --version # 预期输出：rustc nightly-x86_64-pc-windows-msvc
+          cargo --version # 预期输出：cargo nightly-x86_64-pc-windows-msvc
 
-      # 编译正常系统端
+      # 编译正常系统端（Nightly版直接支持edition2024）
       - name: Build Normal System Version
         run: |
           cd 正常系统端
@@ -74,8 +72,8 @@ jobs:
           cargo build --release --verbose
         working-directory: .
 
-      # 缓存隔离：Key加入1.80.0，与旧版本彻底切割
-      - name: Cache Cargo Dependencies (1.80.0 exclusive)
+      # 缓存隔离：Nightly版专属缓存，与稳定版彻底切割
+      - name: Cache Cargo Dependencies (Nightly exclusive)
         uses: actions/cache@v4
         with:
           path: |
@@ -83,25 +81,23 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             **/target
-          key: ${{ runner.os }}-cargo-1.80.0-${{ hashFiles('**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-1.80.0-
+            ${{ runner.os }}-cargo-nightly-
 
-      # 打包产物（容错创建目录，避免路径不存在报错）
+      # 打包产物
       - name: Package Build Artifacts
         shell: pwsh
         run: |
-          # 容错创建目录，忽略已存在错误
           New-Item -Path ./release/NormalSystem -ItemType Directory -Force -ErrorAction SilentlyContinue
           New-Item -Path ./release/PE -ItemType Directory -Force -ErrorAction SilentlyContinue
-          # 复制产物
           Copy-Item -Path ./正常系统端/target/release/* -Destination ./release/NormalSystem/ -Recurse -Force -ErrorAction SilentlyContinue
           Copy-Item -Path ./PE端/target/release/* -Destination ./release/PE/ -Recurse -Force -ErrorAction SilentlyContinue
 
-      # 上传产物（标注1.80.0，方便版本区分）
+      # 上传产物
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LetRecovery-Windows-Release-1.80.0
+          name: LetRecovery-Windows-Release-Nightly
           path: ./release/
           retention-days: 30

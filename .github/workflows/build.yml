@@ -1,11 +1,10 @@
-# 纯英文名称，符合GitHub Actions解析规范
 name: LetRecovery Auto Build
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # 支持手动触发
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -15,26 +14,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 核心修改1：升级Rust到1.77.0（正式支持edition2024）
-      - name: Install Rust 1.77.0 (support edition2024)
+      # 核心修改1：升级到Rust 1.79.0（edition2024正式稳定最低版）
+      - name: Install Rust 1.79.0 (stable edition2024)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.77.0  # 替换为支持edition2024的最低稳定版
-          override: true     # 强制覆盖系统旧版本
-          profile: minimal   # 仅安装核心工具，提升速度
+          toolchain: 1.79.0  # 关键：替换为正式支持edition2024的稳定版
+          override: true
+          profile: minimal
 
-      # 核心修改2：彻底清理旧锁文件+旧编译产物，避免版本冲突
-      - name: Clean old Cargo.lock and target files
+      # 核心修改2：超彻底清理旧文件+缓存，避免所有解析残留
+      - name: Clean all old build files & cache
         shell: pwsh
         run: |
-          # 删除两个子项目的旧锁文件
-          if (Test-Path ./正常系统端/Cargo.lock) { Remove-Item ./正常系统端/Cargo.lock -Force }
-          if (Test-Path ./PE端/Cargo.lock) { Remove-Item ./PE端/Cargo.lock -Force }
-          # 删除两个子项目的旧target目录（1.75.0编译的残留文件）
-          if (Test-Path ./正常系统端/target) { Remove-Item ./正常系统端/target -Recurse -Force }
-          if (Test-Path ./PE端/target) { Remove-Item ./PE端/target -Recurse -Force }
+          # 清理两个子项目的Cargo.lock和target（核心）
+          $projects = @("./正常系统端", "./PE端")
+          foreach ($proj in $projects) {
+            if (Test-Path "$proj/Cargo.lock") { Remove-Item "$proj/Cargo.lock" -Force }
+            if (Test-Path "$proj/target") { Remove-Item "$proj/target" -Recurse -Force }
+          }
+          # 清理Cargo注册表缓存（镜像源下载的旧依赖清单，关键）
+          if (Test-Path "$env:USERPROFILE\.cargo\registry") { Remove-Item "$env:USERPROFILE\.cargo\registry" -Recurse -Force }
+          # 清理Cargo git缓存
+          if (Test-Path "$env:USERPROFILE\.cargo\git") { Remove-Item "$env:USERPROFILE\.cargo\git" -Recurse -Force }
 
-      # 保留Rust清华镜像，加速依赖下载
+      # 保留清华镜像源，加速依赖下载（无需更换）
       - name: Configure Rust Tuna Mirror
         shell: pwsh
         run: |
@@ -46,15 +49,14 @@ jobs:
           registry = 'https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git'
           "@
 
-      # 配置MSVC构建工具，解决link.exe缺失问题
       - name: Setup MSVC Build Tools
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 新增：验证工具链版本（可选，用于调试确认）
+      # 验证版本（确保输出1.79.0）
       - name: Verify Rust/Cargo Version
         run: |
-          rustc --version # 应输出 1.77.0 (xxx 2024-04-24)
-          cargo --version # 应输出 1.77.0 (xxx 2024-04-09)
+          rustc --version # 预期：rustc 1.79.0 (xxx 2024-07-16)
+          cargo --version # 预期：cargo 1.79.0 (xxx 2024-07-09)
 
       # 编译正常系统端
       - name: Build Normal System Version
@@ -69,7 +71,7 @@ jobs:
           cargo build --release --verbose
         working-directory: .
 
-      # 优化缓存：Key加入工具链版本，避免旧缓存干扰
+      # 核心修改3：缓存Key加入1.79.0，与旧版本缓存彻底隔离
       - name: Cache Cargo Dependencies
         uses: actions/cache@v4
         with:
@@ -78,25 +80,24 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             **/target
-          # 关键：加入toolchain版本，1.77.0的缓存与1.75.0彻底隔离
-          key: ${{ runner.os }}-cargo-1.77.0-${{ hashFiles('**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-1.79.0-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-1.77.0-
+            ${{ runner.os }}-cargo-1.79.0-
 
       # 打包产物（英文目录，避免解析问题）
       - name: Package Build Artifacts
         shell: pwsh
         run: |
-          New-Item -Path ./release -ItemType Directory -Force
-          New-Item -Path ./release/NormalSystem -ItemType Directory -Force
-          New-Item -Path ./release/PE -ItemType Directory -Force
+          New-Item -Path ./release -ItemType Directory -Force -ErrorAction SilentlyContinue
+          New-Item -Path ./release/NormalSystem -ItemType Directory -Force -ErrorAction SilentlyContinue
+          New-Item -Path ./release/PE -ItemType Directory -Force -ErrorAction SilentlyContinue
           Copy-Item -Path ./正常系统端/target/release/* -Destination ./release/NormalSystem/ -Recurse -Force
           Copy-Item -Path ./PE端/target/release/* -Destination ./release/PE/ -Recurse -Force
 
-      # 上传产物
+      # 上传产物（标注版本，方便区分）
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LetRecovery-Windows-Release-1.77.0
+          name: LetRecovery-Windows-Release-1.79.0
           path: ./release/
           retention-days: 30

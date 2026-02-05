@@ -362,7 +362,7 @@ impl Dism {
             }
         }
 
-        anyhow::bail!("无法获取镜像信息：wimgapi 打开文件失败。可能原因：系统 wimgapi.dll 版本过旧不支持此ESD格式，请将新版 wimgapi.dll 放到程序目录")
+        anyhow::bail!("无法获取镜像信息：wimgapi 打开文件失败。可能原因：1.镜像文件损坏 2.系统 wimgapi.dll 版本过旧不支持此ESD格式，请将新版 wimgapi.dll 放到程序目录")
     }
 
     /// 通过读取 ntdll.dll 文件版本判断是否为 Win10/11 镜像
@@ -552,7 +552,6 @@ impl Dism {
 
     /// 解析 WIM XML 元数据字符串
     fn parse_wim_xml(xml: &str) -> Result<Vec<ImageInfo>> {
-        use crate::core::wimgapi::WimImageType;
         
         let mut images = Vec::new();
 
